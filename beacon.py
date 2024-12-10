@@ -2561,7 +2561,7 @@ class BeaconMeshHelper:
 
     def __init__(self, beacon, config, mesh_config):
         self.beacon = beacon
-        self.scipy = None
+        self.scipy_interp = None
         self.mesh_config = mesh_config
         self.bm = self.beacon.printer.load_object(mesh_config, "bed_mesh")
 
@@ -3147,10 +3147,21 @@ class BeaconMeshHelper:
                 faulty_indexes.append((y, x))
         return matrix, faulty_indexes
 
+    def _load_scipy(self):
+        try:
+            return importlib.import_module("scipy.interpolate")
+        except ImportError:
+            pass
+        base = importlib.import_module("scipy")
+        if not hasattr(base, "interpolate"):
+            raise ImportError()
+        else:
+            return base.interpolate
+
     def _load_interpolator(self):
-        if not self.scipy:
+        if self.scipy_interp is None:
             try:
-                self.scipy = importlib.import_module("scipy")
+                self.scipy_interp = self._load_scipy()
             except ImportError:
                 msg = (
                     "Could not load `scipy`. To install it, simply re-run "
@@ -3158,20 +3169,20 @@ class BeaconMeshHelper:
                     "when using faulty regions when bed meshing."
                 )
                 return (True, msg)
-        if hasattr(self.scipy.interpolate, "RBFInterpolator"):
+        if hasattr(self.scipy_interp, "RBFInterpolator"):
 
             def rbf_interp(points, values, faulty):
-                return self.scipy.interpolate.RBFInterpolator(points, values, 64)(
-                    faulty
-                )
+                return self.scipy_interp.RBFInterpolator(points, values, 64)(faulty)
 
             return (False, rbf_interp)
         else:
 
             def linear_interp(points, values, faulty):
-                return self.scipy.interpolate.griddata(
+                return self.scipy_interp.griddata(
                     points, values, faulty, method="linear"
                 )
+
+            return (False, linear_interp)
 
     def _cluster_mean(self, data):
         median_count = max(0, int(math.floor(len(data) / 6)))
