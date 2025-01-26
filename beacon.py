@@ -448,8 +448,12 @@ class BeaconProbe:
                 return self._run_probe_contact(gcmd)
             finally:
                 self._stop_streaming()
+        elif method == "offset":
+            self.cmd_BEACON_OFFSET_COMPARE(gcmd)
+            offset = self.get_offsets();
+            return [self.last_offset_result["position"][0], self.last_offset_result["position"][1], self.last_offset_result["delta"] + offset[2]]
         else:
-            raise gcmd.error("Invalid PROBE_METHOD, valid choices: proximity, contact")
+            raise gcmd.error("Invalid PROBE_METHOD, valid choices: proximity, contact, offset")
 
     def _move_to_probing_height(self, speed):
         target = self.trigger_distance
@@ -1106,10 +1110,11 @@ class BeaconProbe:
     def cmd_PROBE(self, gcmd):
         self.last_probe_result = "failed"
         pos = self.run_probe(gcmd)
-        gcmd.respond_info("Result is z=%.6f" % (pos[2],))
+        #gcmd.respond_info("Result is z=%.6f" % (pos[2],))
         offset = self.get_offsets()
         self.last_z_result = pos[2] - offset[2]
         self.last_probe_position = (pos[0] - offset[0], pos[1] - offset[1])
+        gcmd.respond_info("Result at raw=(%.2f, %.2f) lpp=(%.2f, %.2f) is z=%.6f (last_z_result=%.6f)" % (pos[0], pos[1], self.last_probe_position[0], self.last_probe_position[1], pos[2], self.last_z_result))
         self.last_probe_result = "ok"
 
     cmd_BEACON_CALIBRATE_help = "Calibrate beacon response curve"
@@ -1533,11 +1538,19 @@ class BeaconProbe:
 
     def cmd_BEACON_OFFSET_COMPARE(self, gcmd):
         top = gcmd.get_float("TOP", 2)
+        undo_xy_offset = gcmd.get_int("UNDO_XY_OFFSET", 0) != 0
 
         self.last_probe_result = "failed"
         self.toolhead.get_last_move_time()
         self._sample_async()
         start_pos = self.toolhead.get_position()
+
+        if undo_xy_offset:
+            pos = start_pos[:2]
+            pos[0] += self.x_offset
+            pos[1] += self.y_offset
+            self.toolhead.manual_move(pos, 100.0)
+            self.toolhead.wait_moves()
 
         params = {
             "SAMPLES_DROP": 1,
@@ -1559,8 +1572,9 @@ class BeaconProbe:
 
         # Over
         pos = start_pos[:2]
-        pos[0] -= self.x_offset
-        pos[1] -= self.y_offset
+        if not undo_xy_offset:
+            pos[0] -= self.x_offset
+            pos[1] -= self.y_offset
         self.toolhead.manual_move(pos, 100.0)
         self.toolhead.wait_moves()
 
