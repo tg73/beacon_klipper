@@ -2992,6 +2992,7 @@ class BeaconMeshHelper:
         return False
 
     def _sample_mesh(self, gcmd, path, speed, runs):
+        dump_file = gcmd.get("SAMPLES_FILENAME", None)
         cs = gcmd.get_float("CLUSTER_SIZE", self.cluster_size, minval=0.0)
         zcs = self.zero_ref_pos_cluster_size
         if not (self.zero_ref_mode and self.zero_ref_mode[0] == "pos"):
@@ -3003,6 +3004,9 @@ class BeaconMeshHelper:
         clusters = {}
         total_samples = [0]
         invalid_samples = [0]
+        dump_samples = None
+        if dump_file:
+            dump_samples = []
 
         def cb(sample):
             total_samples[0] += 1
@@ -3010,6 +3014,9 @@ class BeaconMeshHelper:
             (x, y, z) = sample["pos"]
             x += xo
             y += yo
+
+            if dump_file:
+                dump_samples.append((x,y,z,d))
 
             if d is None or math.isinf(d):
                 if self._is_valid_position(x, y):
@@ -3049,6 +3056,12 @@ class BeaconMeshHelper:
 
         with self.beacon.streaming_session(cb):
             self._fly_path(path, speed, runs)
+
+        if dump_file:
+            with open(dump_file, "w") as f:
+                f.write("x,y,z,d\n")
+                for s in dump_samples:
+                    f.write("%.2f,%.2f,%.6f,%.6f\n" % s)
 
         gcmd.respond_info(
             "Sampled %d total points over %d runs" % (total_samples[0], runs)
