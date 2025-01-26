@@ -2619,7 +2619,8 @@ class BeaconMeshHelper:
             "mesh_main_direction", {"x": "x", "X": "x", "y": "y", "Y": "y"}, "y"
         )
         self.overscan = config.getfloat("mesh_overscan", -1, minval=0)
-        self.cluster_size = config.getfloat("mesh_cluster_size", 1, minval=0)
+        self.def_use_lowpass = config.getboolean("mesh_use_lowpass", False)
+        self.def_cluster_size = config.getfloat("mesh_cluster_size", 1, minval=0)
         self.runs = config.getint("mesh_runs", 1, minval=1)
         self.adaptive_margin = mesh_config.getfloat(
             "adaptive_margin", 0, note_valid=False
@@ -2906,6 +2907,15 @@ class BeaconMeshHelper:
         self.step_x = (self.max_x - self.min_x) / (self.res_x - 1)
         self.step_y = (self.max_y - self.min_y) / (self.res_y - 1)
 
+        self.use_lowpass = gcmd.get_int("USE_LOWPASS", self.def_use_lowpass) != 0
+        
+        if self.use_lowpass:
+            if gcmd.get_float("CLUSTER_SIZE", None) != None:
+                logging.warning("CLUSTER_SIZE is ignored when lowpass is enabled.")
+            self.cluster_size = min(self.step_x, self.step_y) / 2
+        else:
+            self.cluster_size = gcmd.get_float("CLUSTER_SIZE", self.def_cluster_size, minval=0.0)
+
         self.toolhead = self.beacon.toolhead
         path = self._generate_path()
 
@@ -2914,6 +2924,7 @@ class BeaconMeshHelper:
 
         speed = gcmd.get_float("SPEED", self.speed, above=0.0)
         runs = gcmd.get_int("RUNS", self.runs, minval=1)
+
 
         try:
             self.beacon._start_streaming()
@@ -3017,7 +3028,7 @@ class BeaconMeshHelper:
         return False
 
     def _sample_mesh(self, gcmd, path, speed, runs):
-        cs = gcmd.get_float("CLUSTER_SIZE", self.cluster_size, minval=0.0)
+        cs = self.cluster_size
         zcs = self.zero_ref_pos_cluster_size
         if not (self.zero_ref_mode and self.zero_ref_mode[0] == "pos"):
             zcs = 0
@@ -3165,9 +3176,10 @@ class BeaconMeshHelper:
     def _generate_matrix(self, raw_clusters, mask):
         faulty_indexes = []
         matrix = np.empty((self.res_y, self.res_x))
+        avg_fn = mean if self.use_lowpass else median
         for (x, y), values in raw_clusters.items():
             if mask is None or mask[(y, x)]:
-                matrix[(y, x)] = self.beacon.trigger_distance - median(values)
+                matrix[(y, x)] = self.beacon.trigger_distance - avg_fn(values)
             else:
                 matrix[(y, x)] = np.nan
                 faulty_indexes.append((y, x))
@@ -3328,6 +3340,9 @@ def float_parse(s):
 
 def median(samples):
     return float(np.median(samples))
+
+def mean(samples):
+    return float(np.mean(samples))
 
 
 def opt_min(a, b):
